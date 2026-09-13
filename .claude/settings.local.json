@@ -20,7 +20,8 @@
       "Bash(git push *)",
       "Bash(python -m py_compile src/job_automation/scoring/*.py src/job_automation/profile/loader.py)",
       "Bash(python -m job_automation.cli score --help)",
-      "Bash(git commit -m 'Phase 2: Complete Job Scoring module implementation *)"
+      "Bash(git commit -m 'Phase 2: Complete Job Scoring module implementation *)",
+      "Bash(git commit -m 'Phases 3-6: Complete ApplyPilot implementation - Full job automation pipeline *)"
     ]
   }
 }
