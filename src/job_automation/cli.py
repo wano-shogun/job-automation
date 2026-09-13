@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import click
 
+from job_automation.autofill.engine import AutofillEngine
+from job_automation.browser.driver import BrowserDriver
 from job_automation.db import DEFAULT_DB_PATH, JobRepository
 from job_automation.models import Application, ApplicationStatus
+from job_automation.profile.loader import ProfileLoader
 
 
 @click.group()
@@ -71,6 +74,92 @@ def update_status(ctx: click.Context, application_id: int, status: str) -> None:
     if updated is None:
         raise click.ClickException(f"No application with id {application_id}")
     click.echo(f"Application #{updated.id} is now {updated.status.value}")
+
+
+@main.group(name="autofill")
+@click.pass_context
+def autofill_group(ctx: click.Context) -> None:
+    """Autofill job application forms across job boards."""
+    pass
+
+
+@autofill_group.command(name="run")
+@click.argument("url")
+@click.option("--auto-fill", is_flag=True, help="Auto-fill without asking for confirmation.")
+@click.pass_context
+def autofill_run(ctx: click.Context, url: str, auto_fill: bool) -> None:
+    """Autofill a job application form.
+
+    Opens the URL in Chrome, analyzes the form, shows a fill plan,
+    and fills it with your profile data. You review before final submission.
+
+    Example:
+        job-automation autofill run "https://www.example.com/careers/job/123"
+    """
+    try:
+        # Validate profile and answers exist
+        profile_loader = ProfileLoader()
+        if not profile_loader.validate_profile():
+            raise click.ClickException("Profile not found at ~/.job-automation/profile.json")
+        if not profile_loader.validate_answers():
+            raise click.ClickException("Answers not found at ~/.job-automation/answers.json")
+
+        click.echo("🚀 Starting autofill workflow...")
+        click.echo(f"📍 URL: {url}")
+
+        # Open browser and navigate
+        driver = BrowserDriver()
+        driver.start()
+
+        try:
+            click.echo("🌐 Opening page...")
+            driver.navigate_to(url)
+
+            # Create autofill engine
+            engine = AutofillEngine(profile_loader, driver.get_driver())
+
+            # Analyze the form
+            click.echo("📋 Analyzing form...")
+            plan = engine.create_autofill_plan()
+
+            # Print the plan
+            engine.print_plan(plan)
+
+            # Ask for confirmation (unless --auto-fill)
+            should_fill = auto_fill or click.confirm("✓ Fill the form?")
+
+            if should_fill:
+                click.echo("🚀 Filling form...")
+                engine.fill_form(plan)
+                click.echo("\n" + "=" * 60)
+                click.echo("✅ FORM FILLED - REVIEW AND SUBMIT MANUALLY")
+                click.echo("=" * 60)
+                click.echo("The form has been filled with your profile data.")
+                click.echo("Please review all fields and click Submit when ready.")
+                click.echo("The browser will remain open for you to interact with.")
+                click.echo("Press Ctrl+C here to close the browser when done.")
+                click.echo("=" * 60 + "\n")
+
+                # Keep browser open
+                import time
+
+                try:
+                    while True:
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    click.echo("\nClosing browser...")
+            else:
+                click.echo("❌ Cancelled. Form not filled.")
+
+        finally:
+            driver.stop()
+
+    except FileNotFoundError as e:
+        raise click.ClickException(f"Configuration error: {e}")
+    except ValueError as e:
+        raise click.ClickException(f"Form error: {e}")
+    except Exception as e:
+        raise click.ClickException(f"Autofill error: {e}")
 
 
 if __name__ == "__main__":
