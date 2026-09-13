@@ -59,7 +59,7 @@ class JobRepository:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.db_path)
         self._conn.row_factory = sqlite3.Row
-        self._conn.execute(_SCHEMA)
+        self._conn.executescript(_SCHEMA)
         self._conn.commit()
 
     def close(self) -> None:
@@ -138,7 +138,7 @@ class JobDiscoveryRepository:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.db_path)
         self._conn.row_factory = sqlite3.Row
-        self._conn.execute(_SCHEMA)
+        self._conn.executescript(_SCHEMA)
         self._conn.commit()
 
     def close(self) -> None:

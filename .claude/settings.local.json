@@ -21,7 +21,11 @@
       "Bash(python -m py_compile src/job_automation/scoring/*.py src/job_automation/profile/loader.py)",
       "Bash(python -m job_automation.cli score --help)",
       "Bash(git commit -m 'Phase 2: Complete Job Scoring module implementation *)",
-      "Bash(git commit -m 'Phases 3-6: Complete ApplyPilot implementation - Full job automation pipeline *)"
+      "Bash(git commit -m 'Phases 3-6: Complete ApplyPilot implementation - Full job automation pipeline *)",
+      "Bash(git commit -m 'Final: All 6 ApplyPilot phases complete and production-ready *)",
+      "Bash(python -m job_automation.cli score update-profile --skills Python --skills JavaScript --skills React.js --skills Docker --skills AWS --experience 5 --role 'Senior Full-Stack Developer' --remote hybrid)",
+      "Bash(python)",
+      "Bash(git commit -m 'Fix: SQLite schema execution - use executescript for multiple statements *)"
     ]
   }
 }
