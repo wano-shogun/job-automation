@@ -20,6 +20,8 @@ from job_automation.discovery import (
     ZipRecruiterScraper,
     GoogleJobsScraper,
 )
+from job_automation.scoring import JobRanker
+from job_automation.profile.loader import ProfileLoader
 
 
 @click.group()
@@ -343,6 +345,133 @@ def discover_clean(ctx: click.Context, days: int) -> None:
         deleted = repo.delete_jobs_before(days)
 
     click.echo(f"✅ Deleted {deleted} jobs older than {days} days.")
+
+
+@main.group(name="score")
+@click.pass_context
+def score_group(ctx: click.Context) -> None:
+    """Score and rank job listings based on profile match."""
+    pass
+
+
+@score_group.command(name="jobs")
+@click.option("--min-score", type=int, default=6, help="Minimum match score (1-10).")
+@click.option("--top", type=int, default=10, help="Show top N matches.")
+@click.option("--use-claude", is_flag=True, default=False, help="Use Claude AI for intelligent scoring.")
+@click.option("--source", default=None, help="Filter by job board source.")
+@click.pass_context
+def score_jobs(
+    ctx: click.Context, min_score: int, top: int, use_claude: bool, source: str
+) -> None:
+    """Score and rank discovered jobs based on your profile.
+
+    Uses machine learning to match job requirements to your skills and experience.
+
+    Example:
+        job-automation score jobs --min-score 7 --top 20
+        job-automation score jobs --use-claude  # Use Claude for better scoring
+    """
+    try:
+        # Load profile
+        profile_loader = ProfileLoader()
+        if not profile_loader.validate_profile():
+            raise click.ClickException(
+                "Profile not found at ~/.job-automation/profile.json"
+            )
+        profile = profile_loader.load_profile()
+
+        # Load discovered jobs
+        with JobDiscoveryRepository(ctx.obj["db_path"]) as repo:
+            jobs = repo.list_jobs(source=source, limit=1000)
+
+        if not jobs:
+            click.echo("No jobs found. Try running 'job-automation discover search' first.")
+            return
+
+        click.echo(f"🔍 Scoring {len(jobs)} jobs based on your profile...")
+        if profile.skills:
+            click.echo(f"   Your skills: {', '.join(profile.skills[:5])}")
+        click.echo(f"   Target: {profile.target_role}")
+        click.echo()
+
+        # Rank jobs
+        ranker = JobRanker()
+        ranked = ranker.rank_jobs(
+            jobs, profile, min_score=min_score, use_claude=use_claude
+        )
+
+        if not ranked:
+            click.echo(f"No jobs matched your criteria (min score: {min_score}).")
+            click.echo("Try lowering --min-score or running 'discover search' to find more jobs.")
+            return
+
+        # Display results
+        click.echo(ranker.get_ranking_summary(ranked[:top]))
+
+        # Save results
+        click.echo(f"\n✅ Found {len(ranked)} matching jobs (showing top {min(top, len(ranked))})")
+
+    except FileNotFoundError as e:
+        raise click.ClickException(f"Configuration error: {e}")
+    except Exception as e:
+        raise click.ClickException(f"Scoring error: {e}")
+
+
+@score_group.command(name="update-profile")
+@click.option("--skills", multiple=True, help="Add skills (can use multiple times).")
+@click.option("--experience", type=int, help="Years of experience.")
+@click.option("--role", help="Target role/title.")
+@click.option("--industries", multiple=True, help="Preferred industries.")
+@click.option("--remote", type=click.Choice(["remote", "hybrid", "onsite"]), help="Remote preference.")
+@click.pass_context
+def score_update_profile(
+    ctx: click.Context,
+    skills: tuple,
+    experience: int,
+    role: str,
+    industries: tuple,
+    remote: str,
+) -> None:
+    """Update your profile for better job scoring.
+
+    Example:
+        job-automation score update-profile --skills Python --skills JavaScript \\
+          --experience 5 --role "Senior Developer" --remote hybrid
+    """
+    try:
+        profile_loader = ProfileLoader()
+        if not profile_loader.validate_profile():
+            raise click.ClickException("Profile not found")
+
+        profile = profile_loader.load_profile()
+
+        # Update profile fields
+        if skills:
+            profile.skills = list(skills)
+            click.echo(f"✅ Skills updated: {', '.join(profile.skills)}")
+
+        if experience is not None:
+            profile.years_of_experience = experience
+            click.echo(f"✅ Experience updated: {experience} years")
+
+        if role:
+            profile.target_role = role
+            click.echo(f"✅ Target role updated: {role}")
+
+        if industries:
+            profile.preferred_industries = list(industries)
+            click.echo(f"✅ Preferred industries: {', '.join(profile.preferred_industries)}")
+
+        if remote:
+            profile.remote_preference = remote
+            click.echo(f"✅ Remote preference: {remote}")
+
+        # Save updated profile
+        profile_loader.save_profile(profile)
+        click.echo("\n✅ Profile saved successfully!")
+
+    except Exception as e:
+        raise click.ClickException(f"Error updating profile: {e}")
 
 
 if __name__ == "__main__":

@@ -32,6 +32,30 @@ class Profile(BaseModel):
     # Resume (file path)
     resume: Optional[str] = None
 
+    # Professional skills and experience (for job scoring)
+    skills: list[str] = Field(
+        default_factory=list,
+        description="List of technical and professional skills (e.g., Python, JavaScript, Project Management)",
+    )
+    years_of_experience: int = Field(
+        default=0, description="Total years of professional experience"
+    )
+    target_role: str = Field(
+        default="Software Engineer",
+        description="Target job role or title",
+    )
+    preferred_industries: list[str] = Field(
+        default_factory=list,
+        description="Preferred industries (e.g., Tech, Finance, Healthcare)",
+    )
+    willing_to_relocate: bool = Field(
+        default=False, description="Willing to relocate for a job?"
+    )
+    remote_preference: str = Field(
+        default="hybrid",
+        description="Remote work preference: remote, hybrid, or onsite",
+    )
+
     class Config:
         """Pydantic config."""
 

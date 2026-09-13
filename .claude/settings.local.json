@@ -10,7 +10,17 @@
       "Bash(python -m job_automation.cli discover --help)",
       "Bash(python -m job_automation.cli discover search --help)",
       "Bash(git add *)",
-      "Bash(git commit -m 'Phase 1: Complete Job Discovery module implementation *)"
+      "Bash(git commit -m 'Phase 1: Complete Job Discovery module implementation *)",
+      "Bash(git commit -m 'Document Phase 1 completion and plan next phases *)",
+      "Bash(ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N \"\" -C \"venkattdurga@gmail.com\")",
+      "Read(//c/Users/vvill/.ssh/**)",
+      "Bash(gh version *)",
+      "PowerShell(Start-Process \"https://github.com/new?name=job-automation&description=Automate+job+applications+with+autofill,+discovery,+and+scoring&visibility=public\" -UseNewWindow)",
+      "PowerShell(Start-Process \"https://github.com/new?name=job-automation&description=Automate+job+applications+with+autofill,+discovery,+and+scoring\")",
+      "Bash(git push *)",
+      "Bash(python -m py_compile src/job_automation/scoring/*.py src/job_automation/profile/loader.py)",
+      "Bash(python -m job_automation.cli score --help)",
+      "Bash(git commit -m 'Phase 2: Complete Job Scoring module implementation *)"
     ]
   }
 }

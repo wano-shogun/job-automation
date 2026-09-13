@@ -128,6 +128,28 @@ class ProfileLoader:
         except Exception:
             return False
 
+    def save_profile(self, profile: Profile) -> None:
+        """Save profile to file.
+
+        Args:
+            profile: Profile object to save
+        """
+        self.profile_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.profile_path, "w") as f:
+            json.dump(profile.model_dump(exclude_none=True), f, indent=2)
+        self._profile = profile  # Update cache
+
+    def save_answers(self, answers: Answers) -> None:
+        """Save answers to file.
+
+        Args:
+            answers: Answers object to save
+        """
+        self.answers_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.answers_path, "w") as f:
+            json.dump(answers.model_dump(exclude_none=True), f, indent=2)
+        self._answers = answers  # Update cache
+
 
 def create_sample_profile(path: Path | str = None) -> None:
     """Create a sample profile.json file.
