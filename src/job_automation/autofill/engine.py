@@ -62,6 +62,20 @@ class AutofillEngine:
         Returns:
             An AutofillPlan with suggestions.
         """
+        import time
+
+        # Wait for page to load
+        time.sleep(2)
+
+        # Scroll down to look for forms (some are below the fold)
+        try:
+            from selenium.webdriver.common.by import By
+
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(1)
+        except Exception:
+            pass
+
         # Detect which job board we're on
         job_board = detect_job_board_from_driver(self.driver)
 

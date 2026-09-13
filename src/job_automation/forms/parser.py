@@ -66,6 +66,8 @@ def parse_forms_from_page(driver: webdriver.Chrome) -> list[Form]:
     Returns:
         A list of Form objects found on the page.
     """
+    import time
+
     page_source = driver.page_source
     soup = BeautifulSoup(page_source, "html.parser")
 
@@ -73,6 +75,26 @@ def parse_forms_from_page(driver: webdriver.Chrome) -> list[Form]:
     for form_elem in soup.find_all("form"):
         form = _parse_form_element(form_elem)
         forms.append(form)
+
+    # If no forms found, try to find and switch to iframes
+    if not forms:
+        try:
+            iframes = driver.find_elements("tag name", "iframe")
+            for i, iframe in enumerate(iframes):
+                try:
+                    driver.switch_to.frame(iframe)
+                    time.sleep(0.5)
+                    page_source = driver.page_source
+                    soup = BeautifulSoup(page_source, "html.parser")
+                    for form_elem in soup.find_all("form"):
+                        form = _parse_form_element(form_elem)
+                        forms.append(form)
+                    driver.switch_to.default_content()
+                except Exception:
+                    driver.switch_to.default_content()
+                    continue
+        except Exception:
+            pass
 
     return forms
 

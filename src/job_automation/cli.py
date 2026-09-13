@@ -10,9 +10,16 @@ import click
 
 from job_automation.autofill.engine import AutofillEngine
 from job_automation.browser.driver import BrowserDriver
-from job_automation.db import DEFAULT_DB_PATH, JobRepository
+from job_automation.db import DEFAULT_DB_PATH, JobRepository, JobDiscoveryRepository
 from job_automation.models import Application, ApplicationStatus
 from job_automation.profile.loader import ProfileLoader
+from job_automation.discovery import (
+    IndeedScraper,
+    LinkedInScraper,
+    GlassdoorScraper,
+    ZipRecruiterScraper,
+    GoogleJobsScraper,
+)
 
 
 @click.group()
@@ -160,6 +167,182 @@ def autofill_run(ctx: click.Context, url: str, auto_fill: bool) -> None:
         raise click.ClickException(f"Form error: {e}")
     except Exception as e:
         raise click.ClickException(f"Autofill error: {e}")
+
+
+@main.group(name="discover")
+@click.pass_context
+def discover_group(ctx: click.Context) -> None:
+    """Discover job listings from various job boards."""
+    pass
+
+
+@discover_group.command(name="search")
+@click.argument("query")
+@click.option("--location", default="", help="Job location.")
+@click.option("--source", type=click.Choice(["indeed", "linkedin", "glassdoor", "ziprecruiter", "google_jobs", "all"]), default="all", help="Job board to search.")
+@click.option("--limit", type=int, default=10, help="Number of results to show.")
+@click.pass_context
+def discover_search(
+    ctx: click.Context, query: str, location: str, source: str, limit: int
+) -> None:
+    """Search for jobs across job boards.
+
+    QUERY: Job title or keyword to search for
+
+    Example:
+        job-automation discover search "Python Developer" --location "San Francisco"
+        job-automation discover search "Data Scientist" --source indeed
+    """
+    click.echo(f"🔍 Searching for: {query}")
+    if location:
+        click.echo(f"📍 Location: {location}")
+
+    scrapers = {}
+    if source == "all" or source == "indeed":
+        scrapers["indeed"] = IndeedScraper()
+    if source == "all" or source == "linkedin":
+        scrapers["linkedin"] = LinkedInScraper()
+    if source == "all" or source == "glassdoor":
+        scrapers["glassdoor"] = GlassdoorScraper()
+    if source == "all" or source == "ziprecruiter":
+        scrapers["ziprecruiter"] = ZipRecruiterScraper()
+    if source == "all" or source == "google_jobs":
+        scrapers["google_jobs"] = GoogleJobsScraper()
+
+    all_jobs = []
+    with JobDiscoveryRepository(ctx.obj["db_path"]) as discovery_repo:
+        for source_name, scraper in scrapers.items():
+            try:
+                click.echo(f"  Searching {source_name}...", err=True)
+                jobs = scraper.search(query, location, page=1)
+
+                # Save jobs to database
+                if jobs:
+                    discovery_repo.add_jobs(jobs)
+                    all_jobs.extend(jobs[:limit])
+                    click.echo(f"  Found {len(jobs)} jobs on {source_name}", err=True)
+                    discovery_repo.update_scraper_status(source_name, success=True)
+                else:
+                    click.echo(f"  No jobs found on {source_name}", err=True)
+                    discovery_repo.update_scraper_status(source_name, success=True)
+            except Exception as e:
+                click.echo(f"  Error searching {source_name}: {e}", err=True)
+                discovery_repo.update_scraper_status(source_name, success=False, error_message=str(e))
+            finally:
+                scraper.close()
+
+    if not all_jobs:
+        click.echo("No jobs found.")
+        return
+
+    click.echo(f"\n📋 Found {len(all_jobs)} jobs:\n")
+    for i, job in enumerate(all_jobs[:limit], 1):
+        click.echo(f"{i}. {job.title}")
+        click.echo(f"   Company: {job.company}")
+        click.echo(f"   Location: {job.location}")
+        if job.salary:
+            click.echo(f"   Salary: {job.salary}")
+        click.echo(f"   Source: {job.source}")
+        click.echo(f"   URL: {job.url}")
+        click.echo()
+
+
+@discover_group.command(name="list")
+@click.option("--source", default=None, help="Filter by job board source.")
+@click.option("--limit", type=int, default=20, help="Number of jobs to show.")
+@click.option("--offset", type=int, default=0, help="Offset for pagination.")
+@click.pass_context
+def discover_list(ctx: click.Context, source: str, limit: int, offset: int) -> None:
+    """List discovered jobs.
+
+    Example:
+        job-automation discover list
+        job-automation discover list --source indeed --limit 50
+    """
+    with JobDiscoveryRepository(ctx.obj["db_path"]) as repo:
+        jobs = repo.list_jobs(source=source, limit=limit, offset=offset)
+        total = repo.get_job_count(source=source)
+
+    if not jobs:
+        click.echo("No jobs found.")
+        return
+
+    click.echo(f"📋 Jobs ({offset + 1}-{offset + len(jobs)} of {total}):\n")
+    for i, job in enumerate(jobs, offset + 1):
+        click.echo(f"{i}. {job.title}")
+        click.echo(f"   Company: {job.company}")
+        click.echo(f"   Location: {job.location}")
+        if job.salary:
+            click.echo(f"   Salary: {job.salary}")
+        click.echo(f"   Source: {job.source}")
+        click.echo(f"   Discovered: {job.discovered_date.strftime('%Y-%m-%d %H:%M')}")
+        click.echo()
+
+
+@discover_group.command(name="search-jobs")
+@click.argument("search_query")
+@click.option("--limit", type=int, default=20, help="Number of results to show.")
+@click.pass_context
+def discover_search_jobs(ctx: click.Context, search_query: str, limit: int) -> None:
+    """Search through discovered jobs in the database.
+
+    SEARCH_QUERY: Search term (matches title, company, location)
+
+    Example:
+        job-automation discover search-jobs "Python"
+        job-automation discover search-jobs "San Francisco"
+    """
+    with JobDiscoveryRepository(ctx.obj["db_path"]) as repo:
+        jobs = repo.search_jobs(search_query, limit=limit)
+
+    if not jobs:
+        click.echo(f"No jobs found matching '{search_query}'.")
+        return
+
+    click.echo(f"🔍 Found {len(jobs)} jobs matching '{search_query}':\n")
+    for i, job in enumerate(jobs, 1):
+        click.echo(f"{i}. {job.title}")
+        click.echo(f"   Company: {job.company}")
+        click.echo(f"   Location: {job.location}")
+        click.echo(f"   Source: {job.source}")
+        click.echo(f"   URL: {job.url}")
+        click.echo()
+
+
+@discover_group.command(name="stats")
+@click.pass_context
+def discover_stats(ctx: click.Context) -> None:
+    """Show job discovery statistics."""
+    with JobDiscoveryRepository(ctx.obj["db_path"]) as repo:
+        for source in ["indeed", "linkedin", "glassdoor", "ziprecruiter", "google_jobs"]:
+            count = repo.get_job_count(source=source)
+            status = repo.get_scraper_status(source)
+
+            click.echo(f"\n{source.upper()}:")
+            click.echo(f"  Jobs: {count}")
+            if status:
+                click.echo(f"  Last run: {status['last_run']}")
+                click.echo(f"  Last success: {status['last_success']}")
+                if status['error_count'] > 0:
+                    click.echo(f"  Errors: {status['error_count']}")
+                    if status['error_message']:
+                        click.echo(f"  Last error: {status['error_message']}")
+
+
+@discover_group.command(name="clean")
+@click.option("--days", type=int, default=30, help="Delete jobs older than N days.")
+@click.confirmation_option(prompt="Delete old jobs? This cannot be undone.")
+@click.pass_context
+def discover_clean(ctx: click.Context, days: int) -> None:
+    """Delete old discovered jobs to save space.
+
+    Example:
+        job-automation discover clean --days 30
+    """
+    with JobDiscoveryRepository(ctx.obj["db_path"]) as repo:
+        deleted = repo.delete_jobs_before(days)
+
+    click.echo(f"✅ Deleted {deleted} jobs older than {days} days.")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(pip install *)"
+      "PowerShell(pip install *)",
+      "Skill(update-config)",
+      "Skill(update-config:*)",
+      "Bash(python -m py_compile src/job_automation/discovery/*.py src/job_automation/models.py src/job_automation/db.py src/job_automation/cli.py)",
+      "Bash(python -m pytest tests/test_discovery.py -v)",
+      "Bash(python -m job_automation.cli --help)",
+      "Bash(python -m job_automation.cli discover --help)",
+      "Bash(python -m job_automation.cli discover search --help)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'Phase 1: Complete Job Discovery module implementation *)"
     ]
   }
 }
