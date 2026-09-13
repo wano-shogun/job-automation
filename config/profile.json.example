@@ -1,0 +1,16 @@
+{
+  "name": "John Doe",
+  "firstName": "John",
+  "lastName": "Doe",
+  "email": "john@example.com",
+  "phone": "555-123-4567",
+  "linkedIn": "https://linkedin.com/in/johndoe",
+  "github": "https://github.com/johndoe",
+  "portfolio": "https://johndoe.com",
+  "address": "123 Main St",
+  "city": "San Francisco",
+  "state": "CA",
+  "zip": "94105",
+  "country": "United States",
+  "resume": "/path/to/resume.pdf"
+}
