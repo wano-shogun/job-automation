@@ -188,7 +188,10 @@ class JobSubmitter:
         normal = _normalise_key(identity)
         if normal in values:
             return values[normal]
-        for key, value in values.items():
+        # Check longer keys first: "firstname" must win over the generic
+        # "name" when both appear in a combined label/name/id identity.
+        for key in sorted(values, key=len, reverse=True):
+            value = values[key]
             if len(key) > 3 and (key in normal or normal in key):
                 return value
         return None
@@ -227,7 +230,20 @@ def _normalise_key(value: str) -> str:
 
 
 def _normalise_values(values: dict[str, Any]) -> dict[str, str]:
-    return {_normalise_key(key): str(value) for key, value in values.items() if value not in (None, "", [], {})}
+    normalised = {
+        _normalise_key(key): str(value)
+        for key, value in values.items()
+        if value not in (None, "", [], {})
+    }
+    # Profiles commonly keep only a full name. Native ATS forms frequently
+    # split that value into two required fields, so derive them when they were
+    # not supplied explicitly.
+    name = normalised.get("name", "").split()
+    if name:
+        normalised.setdefault("firstname", name[0])
+        if len(name) > 1:
+            normalised.setdefault("lastname", " ".join(name[1:]))
+    return normalised
 
 
 def _company_from_url(url: str) -> str:
