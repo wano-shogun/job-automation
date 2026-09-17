@@ -20,7 +20,13 @@ def temp_db():
 @pytest.fixture
 def repo(temp_db):
     """Create a JobDiscoveryRepository for testing."""
-    return JobDiscoveryRepository(temp_db)
+    repository = JobDiscoveryRepository(temp_db)
+    try:
+        yield repository
+    finally:
+        # SQLite keeps the database file locked on Windows until its connection
+        # is closed.  Closing here lets TemporaryDirectory remove test.db.
+        repository.close()
 
 
 @pytest.fixture

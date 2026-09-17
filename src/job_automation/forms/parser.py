@@ -37,6 +37,7 @@ class FormField:
     required: bool = False
     element_id: Optional[str] = None
     element_class: Optional[str] = None
+    selector: Optional[str] = None
 
     def __repr__(self) -> str:
         """Return a readable representation."""
@@ -188,6 +189,7 @@ def _parse_field_element(elem) -> Optional[FormField]:
         required=required,
         element_id=field_id,
         element_class=" ".join(field_class) if field_class else None,
+        selector=(f"#{field_id}" if field_id else f'[name="{field_name}"]'),
     )
 
 

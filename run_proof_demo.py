@@ -1,84 +1,59 @@
-#!/usr/bin/env python
-"""Demo autofill on ProofServe real job."""
+"""Run ApplyPilot's browser filler against a URL or the included local form.
 
+The default only fills fields and leaves the browser open for review.  Passing
+``--submit`` requires an additional typed confirmation before it can send a
+real application.
+"""
+
+from __future__ import annotations
+
+import argparse
 import time
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from bs4 import BeautifulSoup
+from pathlib import Path
 
-print("🚀 ProofServe Autofill Demo")
-print("=" * 60)
+from job_automation.apply import JobSubmitter
+from job_automation.browser.driver import BrowserDriver
+from job_automation.profile.loader import ProfileLoader
 
-options = Options()
-driver = webdriver.Chrome(options=options)
 
-try:
-    # Navigate to ProofServe job
-    url = "https://www.proofserve.com/careers/4716759005"
-    print(f"🌐 Opening: {url}")
-    driver.get(url)
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Fill a job application in Chrome.")
+    parser.add_argument(
+        "url",
+        nargs="?",
+        default=(Path(__file__).with_name("test_form.html").resolve().as_uri()),
+        help="Application URL. Defaults to the local safe test form.",
+    )
+    parser.add_argument("--resume", help="Path to resume PDF or DOCX.")
+    parser.add_argument("--submit", action="store_true", help="Click the final submit button.")
+    args = parser.parse_args()
 
-    # Wait for page
-    time.sleep(3)
+    if args.submit:
+        confirmation = input("This will submit a real application. Type SUBMIT to continue: ")
+        if confirmation != "SUBMIT":
+            raise SystemExit("Submission cancelled.")
 
-    # Scroll down to find form
-    print("📍 Scrolling to find form...")
-    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-    time.sleep(2)
+    browser = BrowserDriver()
+    browser.start()
+    try:
+        submitter = JobSubmitter(browser.get_driver(), ProfileLoader())
+        result = submitter.submit_application(args.url, args.resume, submit=args.submit)
+        print(f"Status: {result.status}")
+        print(f"Fields filled: {len(result.fields_filled)}")
+        if result.required_fields_needing_review:
+            print("Required fields needing review:")
+            for field in result.required_fields_needing_review:
+                print(f"- {field}")
+        if result.notes:
+            print(result.notes)
+        print("Browser is open for review. Press Ctrl+C here to close it.")
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Closing browser.")
+    finally:
+        browser.stop()
 
-    # Parse HTML
-    soup = BeautifulSoup(driver.page_source, "html.parser")
-    forms = soup.find_all("form")
 
-    print(f"\n📋 Forms found: {len(forms)}")
-
-    if forms:
-        form = forms[0]
-        fields = form.find_all(["input", "textarea", "select"])
-        print(f"✓ Fields in first form: {len(fields)}")
-
-        for i, field in enumerate(fields[:10], 1):
-            name = field.get("name", "unnamed")
-            field_type = field.get("type", field.name)
-            label = field.get("placeholder", "")
-            print(f"  {i}. {name} ({field_type}) - {label}")
-    else:
-        print("❌ No forms found on page after scroll")
-        print("\nTrying to find and click 'Apply' button...")
-
-        # Look for apply button
-        page_text = soup.get_text()
-        if "Apply now" in page_text:
-            print("✓ Found 'Apply now' button on page")
-            # Try to click via Selenium
-            try:
-                apply_link = driver.find_element(By.LINK_TEXT, "Apply now")
-                print("  Clicking apply button...")
-                apply_link.click()
-                time.sleep(3)
-
-                # Check again for form
-                soup = BeautifulSoup(driver.page_source, "html.parser")
-                forms = soup.find_all("form")
-                if forms:
-                    print(f"✓ Form appeared after click! Found {len(forms)} forms")
-                else:
-                    print("Still no form visible")
-            except Exception as e:
-                print(f"  Could not click: {e}")
-
-    print("\n" + "=" * 60)
-    print("Browser is open. Check the page and press Ctrl+C to close.")
-    print("=" * 60)
-
-    # Keep browser open
-    while True:
-        time.sleep(1)
-
-except KeyboardInterrupt:
-    print("\n✓ Closing...")
-except Exception as e:
-    print(f"Error: {e}")
-finally:
-    driver.quit()
+if __name__ == "__main__":
+    main()

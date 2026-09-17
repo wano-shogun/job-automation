@@ -133,11 +133,22 @@ class AutofillEngine:
                 continue
 
             try:
-                element = self.driver.find_element(By.ID, field.element_id)
+                element = self._locate_element(field)
                 self._fill_field(element, field, value)
             except Exception as e:
                 # Log the error but continue with other fields
                 print(f"Warning: Failed to fill field {field.name}: {e}")
+
+    def _locate_element(self, field):
+        """Locate a form control by id first, then its HTML name.
+
+        Many ATS pages, including Ashby, provide a name but no stable id.
+        Falling back to name makes the generic autofill engine usable on those
+        pages without relying on fragile CSS classes.
+        """
+        if field.element_id:
+            return self.driver.find_element(By.ID, field.element_id)
+        return self.driver.find_element(By.NAME, field.name)
 
     def _fill_field(self, element, field, value: str) -> None:
         """Fill a single form field.

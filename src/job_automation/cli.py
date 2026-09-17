@@ -21,7 +21,7 @@ from job_automation.discovery import (
     GoogleJobsScraper,
 )
 from job_automation.scoring import JobRanker
-from job_automation.profile.loader import ProfileLoader
+from job_automation.apply import JobSubmitter
 
 
 @click.group()
@@ -169,6 +169,54 @@ def autofill_run(ctx: click.Context, url: str, auto_fill: bool) -> None:
         raise click.ClickException(f"Form error: {e}")
     except Exception as e:
         raise click.ClickException(f"Autofill error: {e}")
+
+
+@main.group(name="apply")
+def apply_group() -> None:
+    """Fill a live application in Chrome and optionally submit it."""
+
+
+@apply_group.command(name="fill")
+@click.argument("url")
+@click.option("--resume", type=click.Path(exists=True, dir_okay=False), default=None)
+@click.option("--submit", is_flag=True, help="Click the final submit button after filling.")
+@click.option("--headless", is_flag=True, help="Run Chrome without displaying a window.")
+@click.pass_context
+def apply_fill(ctx: click.Context, url: str, resume: str | None, submit: bool, headless: bool) -> None:
+    """Fill URL from your profile and stop for review unless --submit is used."""
+    loader = ProfileLoader()
+    if not loader.validate_profile():
+        raise click.ClickException("Profile not found at ~/.job-automation/profile.json")
+    if not loader.validate_answers():
+        raise click.ClickException("Answers not found at ~/.job-automation/answers.json")
+    if submit and not click.confirm("This will send a real job application. Continue?"):
+        raise click.ClickException("Submission cancelled.")
+
+    browser = BrowserDriver(headless=headless)
+    browser.start()
+    try:
+        submitter = JobSubmitter(browser.get_driver(), loader)
+        result = submitter.submit_application(url, resume, submit=submit)
+        click.echo(f"Status: {result.status}")
+        click.echo(f"Fields filled: {len(result.fields_filled)}")
+        if result.required_fields_needing_review:
+            click.echo("Needs review: " + ", ".join(result.required_fields_needing_review))
+        if result.notes:
+            click.echo(result.notes)
+        if result.status == "submitted":
+            with JobRepository(ctx.obj["db_path"]) as repo:
+                saved = repo.add(submitter.save_submission_record(result))
+            click.echo(f"Saved application #{saved.id} to the tracker.")
+        if not headless:
+            click.echo("Browser remains open for review. Press Ctrl+C to close it.")
+            try:
+                import time
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                pass
+    finally:
+        browser.stop()
 
 
 @main.group(name="discover")
