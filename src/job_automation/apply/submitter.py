@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support.select import Select
 
 from job_automation.models import Application, ApplicationStatus
@@ -159,7 +160,10 @@ class JobSubmitter:
         result.fields_filled.append(identity)
 
     def _wait_for_document(self) -> None:
-        self.driver.execute_script("return document.readyState !== 'loading';")
+        WebDriverWait(self.driver, 15).until(
+            lambda driver: driver.execute_script("return document.readyState !== 'loading';")
+            and len(driver.find_elements(By.CSS_SELECTOR, "input, textarea, select")) > 0
+        )
 
     def _first_text(self, selector: str) -> str | None:
         try:
