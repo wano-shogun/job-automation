@@ -22,6 +22,7 @@ from job_automation.discovery import (
 )
 from job_automation.scoring import JobRanker
 from job_automation.apply import JobSubmitter
+from job_automation.agent import AgentMode, ApplicationAgent
 
 
 @click.group()
@@ -174,6 +175,57 @@ def autofill_run(ctx: click.Context, url: str, auto_fill: bool) -> None:
 @main.group(name="apply")
 def apply_group() -> None:
     """Fill a live application in Chrome and optionally submit it."""
+
+
+@main.group(name="agent")
+def agent_group() -> None:
+    """Search, rank, and prepare live job applications."""
+
+
+@agent_group.command(name="run")
+@click.argument("query")
+@click.option("--location", default="", help="Job location or Remote.")
+@click.option("--max-jobs", default=1, type=click.IntRange(1, 10), show_default=True)
+@click.option("--min-score", default=6, type=click.IntRange(1, 10), show_default=True)
+@click.option("--headless", is_flag=True, help="Run Chrome without showing a window.")
+def agent_run(query: str, location: str, max_jobs: int, min_score: int, headless: bool) -> None:
+    """Search online, rank matches, and fill up to MAX_JOBS for review."""
+    loader = ProfileLoader()
+    if not loader.validate_profile() or not loader.validate_answers():
+        raise click.ClickException("Create profile.json and answers.json in ~/.job-automation first.")
+
+    def discover(search_query: str, search_location: str):
+        scraper = IndeedScraper()
+        try:
+            return scraper.search(search_query, search_location)
+        finally:
+            scraper.close()
+
+    browser = BrowserDriver(headless=headless)
+    browser.start()
+    try:
+        agent = ApplicationAgent(loader, discover)
+        result = agent.run(
+            query,
+            JobSubmitter(browser.get_driver(), loader),
+            location,
+            mode=AgentMode.HEADLESS if headless else AgentMode.VISIBLE,
+            max_jobs=max_jobs,
+            min_score=min_score,
+        )
+        click.echo(f"Prepared {result.ready_for_review} application(s) for review.")
+        for item in result.items:
+            click.echo(f"{item.job.title} at {item.job.company}: " + (item.error or item.submission.status))
+        if not headless:
+            click.echo("Browser remains open for review. Press Ctrl+C to close it.")
+            try:
+                import time
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                pass
+    finally:
+        browser.stop()
 
 
 @apply_group.command(name="fill")
