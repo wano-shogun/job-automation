@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+import re
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -74,7 +75,7 @@ class JobSubmitter:
             values = adapter.prepare_values(values)
         role = self._first_text("h1") or self.driver.title or "Unknown role"
         submission = ApplicationSubmission(
-            job_id=job_url.rstrip("/").split("/")[-1] or urlparse(job_url).netloc,
+            job_id=_job_id_from_url(job_url),
             company=_company_from_url(job_url),
             role=role,
             submitted_at=datetime.now(),
@@ -87,11 +88,11 @@ class JobSubmitter:
             try:
                 self._fill_one(control, values, resume, submission, adapter)
             except Exception as exc:
-                if control.get_attribute("required"):
-                    submission.required_fields_needing_review.append(
-                        f"{self._identity(control, adapter)} ({exc})"
-                    )
+                submission.required_fields_needing_review.append(
+                    f"{self._identity(control, adapter)} ({type(exc).__name__}: {exc})"
+                )
 
+        submission.required_fields_needing_review = list(dict.fromkeys(submission.required_fields_needing_review))
         if cover_letter_path:
             submission.notes = f"Cover letter prepared at {cover_letter_path}; attach it if the site asks."
         self.submissions.append(submission)
@@ -108,24 +109,36 @@ class JobSubmitter:
     ) -> ApplicationSubmission:
         """Fill an application and only send it when ``submit=True``."""
         result = self.fill_application(job_url, resume_path, cover_letter_path, screening_answers)
-        if not submit:
-            result.status = "ready_for_review"
-            return result
-        if result.required_fields_needing_review:
+        if result.required_fields_needing_review or not result.fields_filled:
             result.status = "needs_review"
-            result.notes = "Required fields still need review: " + ", ".join(result.required_fields_needing_review)
+            if not result.fields_filled:
+                result.notes = "No application fields were filled. Check that this is an application form."
+        else:
+            result.status = "ready_for_review"
+        if not submit or result.status != "ready_for_review":
             return result
         button = self._submit_button()
         if button is None:
             result.status = "needs_review"
             result.notes = "No enabled submit button found."
             return result
+        previous_url = self.driver.current_url
+        previous_text = self.driver.find_element(By.TAG_NAME, "body").text.casefold()
         button.click()
-        result.status = "submitted"
+        try:
+            WebDriverWait(self.driver, 10).until(
+                lambda driver: _submission_confirmed(driver, previous_url, previous_text)
+            )
+            result.status = "submitted"
+        except Exception:
+            result.status = "submission_unconfirmed"
+            result.notes = "Submit was clicked, but the site did not show a confirmation. Check the browser before retrying."
         return result
 
     def save_submission_record(self, submission: ApplicationSubmission) -> Application:
         """Return a tracker record for a browser submission result."""
+        if submission.status != "submitted":
+            raise ValueError("Only confirmed submissions can be recorded as applied")
         return Application(
             company=submission.company,
             role=submission.role,
@@ -134,30 +147,35 @@ class JobSubmitter:
         )
 
     def _fill_one(self, control: Any, values: dict[str, str], resume: Path | None, result: ApplicationSubmission, adapter: Any | None = None) -> None:
-        if not control.is_displayed() or not control.is_enabled():
-            return
         input_type = (control.get_attribute("type") or "").casefold()
+        if not control.is_enabled():
+            return
+        if input_type != "file" and not control.is_displayed():
+            return
         if input_type in {"hidden", "submit", "button", "reset"}:
             return
         identity = self._identity(control, adapter)
+        required = bool(control.get_attribute("required")) or control.get_attribute("aria-required") == "true"
         if input_type == "file":
             if resume and self._looks_like_resume(identity):
                 control.send_keys(str(resume.resolve()))
                 result.fields_filled.append(identity)
-            elif control.get_attribute("required"):
+            elif required:
                 result.required_fields_needing_review.append(identity)
             return
         if input_type in {"checkbox", "radio"}:
             answer = self._lookup_value(identity, values)
             if answer is not None:
-                self._fill_choice(control, answer)
-                result.fields_filled.append(identity)
-            elif control.get_attribute("required"):
+                if self._fill_choice(control, answer):
+                    result.fields_filled.append(identity)
+                elif required:
+                    result.required_fields_needing_review.append(identity)
+            elif required:
                 result.required_fields_needing_review.append(identity)
             return
         value = self._lookup_value(identity, values)
         if value is None:
-            if control.get_attribute("required"):
+            if required:
                 result.required_fields_needing_review.append(identity)
             return
         self._fill_control(control, value)
@@ -197,21 +215,21 @@ class JobSubmitter:
         normal = _normalise_key(identity)
         if normal in values:
             return values[normal]
-        # Check longer keys first: "firstname" must win over the generic
-        # "name" when both appear in a combined label/name/id identity.
+        # Only match a complete label, id, or name token. Substring matching
+        # confuses fields such as "statement" with "state".
         for key in sorted(values, key=len, reverse=True):
-            value = values[key]
-            if len(key) > 3 and (key in normal or normal in key):
-                return value
+            if len(key) > 3 and re.search(rf"(?<![a-z0-9]){re.escape(key)}(?![a-z0-9])", identity.casefold()):
+                return values[key]
         return None
 
     @staticmethod
-    def _fill_choice(control: Any, value: str) -> None:
+    def _fill_choice(control: Any, value: str) -> bool:
         expected = value.casefold().strip()
         option = (control.get_attribute("value") or "").casefold().strip()
         is_match = (expected in {"yes", "true", "1", "on"} and option in {"yes", "true", "1", "on"}) or (expected in {"no", "false", "0", "off"} and option in {"no", "false", "0", "off"})
         if is_match and not control.is_selected():
             control.click()
+        return is_match
 
     @staticmethod
     def _fill_control(control: Any, value: str) -> None:
@@ -256,5 +274,33 @@ def _normalise_values(values: dict[str, Any]) -> dict[str, str]:
 
 
 def _company_from_url(url: str) -> str:
-    host = urlparse(url).netloc.removeprefix("www.")
+    parsed = urlparse(url)
+    host = parsed.netloc.removeprefix("www.")
+    if host == "jobs.ashbyhq.com":
+        board = parsed.path.strip("/").split("/")[0]
+        return unquote(board).replace("-", " ").title() or "Unknown company"
     return host.split(".")[0].replace("-", " ").title() or "Unknown company"
+
+
+def _job_id_from_url(url: str) -> str:
+    parts = [part for part in urlparse(url).path.split("/") if part]
+    if parts and parts[-1].casefold() in {"application", "apply"}:
+        parts.pop()
+    return parts[-1] if parts else urlparse(url).netloc
+
+
+def _submission_confirmed(driver: Any, previous_url: str, previous_text: str) -> bool:
+    """Accept only an explicit success signal after a final submit click."""
+    current = driver.current_url.casefold()
+    if current != previous_url.casefold() and any(word in current for word in ("thank", "success", "confirmation", "submitted")):
+        return True
+    text = (driver.find_element(By.TAG_NAME, "body").text or "").casefold()
+    return any(
+        phrase in text and phrase not in previous_text
+        for phrase in (
+            "application submitted",
+            "application received",
+            "thank you for applying",
+            "thanks for applying",
+        )
+    )

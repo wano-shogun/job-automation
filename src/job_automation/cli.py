@@ -23,6 +23,7 @@ from job_automation.discovery import (
 from job_automation.scoring import JobRanker
 from job_automation.apply import JobSubmitter
 from job_automation.agent import AgentMode, ApplicationAgent
+from job_automation.discovery.ashby import search_ashby_board
 
 
 @click.group()
@@ -188,23 +189,36 @@ def agent_group() -> None:
 @click.option("--max-jobs", default=1, type=click.IntRange(1, 10), show_default=True)
 @click.option("--min-score", default=6, type=click.IntRange(1, 10), show_default=True)
 @click.option("--headless", is_flag=True, help="Run Chrome without showing a window.")
-def agent_run(query: str, location: str, max_jobs: int, min_score: int, headless: bool) -> None:
+@click.option("--ashby-board", multiple=True, help="Search this public Ashby job board; repeat for more boards.")
+@click.option("--resume", type=click.Path(exists=True, dir_okay=False), default=None, help="Resume to attach when requested.")
+def agent_run(query: str, location: str, max_jobs: int, min_score: int, headless: bool, ashby_board: tuple[str, ...], resume: str | None) -> None:
     """Search online, rank matches, and fill up to MAX_JOBS for review."""
     loader = ProfileLoader()
     if not loader.validate_profile() or not loader.validate_answers():
         raise click.ClickException("Create profile.json and answers.json in ~/.job-automation first.")
+    if not ashby_board:
+        raise click.ClickException("Provide at least one --ashby-board NAME. The agent needs direct application URLs; Indeed discovery currently returns listing URLs.")
+    profile = loader.load_profile()
+    click.echo(f"Using profile: {profile.name} ({profile.email})")
 
     def discover(search_query: str, search_location: str):
-        scraper = IndeedScraper()
-        try:
-            return scraper.search(search_query, search_location)
-        finally:
-            scraper.close()
+        jobs = []
+        for board in ashby_board:
+            jobs.extend(search_ashby_board(board, search_query, search_location))
+        return jobs
+
+    agent = ApplicationAgent(loader, discover)
+    ranked = agent.prepare(query, location, max_jobs=max_jobs, min_score=min_score)
+    if not ranked:
+        click.echo("No matching jobs found. No application page was opened.")
+        return
+    click.echo(f"Found {len(ranked)} ranked job(s) (heuristic scores):")
+    for item in ranked:
+        click.echo(f"  {item.match_score}/10 {item.job.title} at {item.job.company}: {item.job.url}")
 
     browser = BrowserDriver(headless=headless)
     browser.start()
     try:
-        agent = ApplicationAgent(loader, discover)
         result = agent.run(
             query,
             JobSubmitter(browser.get_driver(), loader),
@@ -212,10 +226,17 @@ def agent_run(query: str, location: str, max_jobs: int, min_score: int, headless
             mode=AgentMode.HEADLESS if headless else AgentMode.VISIBLE,
             max_jobs=max_jobs,
             min_score=min_score,
+            resume_path=resume,
+            ranked_jobs=ranked,
         )
-        click.echo(f"Prepared {result.ready_for_review} application(s) for review.")
+        filled = sum(bool(item.submission and item.submission.fields_filled) for item in result.items)
+        click.echo(f"Filled {filled} application form(s); {result.ready_for_review} ready for review.")
         for item in result.items:
             click.echo(f"{item.job.title} at {item.job.company}: " + (item.error or item.submission.status))
+            if item.submission:
+                click.echo(f"  Fields filled: {len(item.submission.fields_filled)}")
+            if item.submission and item.submission.required_fields_needing_review:
+                click.echo("  Needs review: " + ", ".join(item.submission.required_fields_needing_review))
         if not headless:
             click.echo("Browser remains open for review. Press Ctrl+C to close it.")
             try:

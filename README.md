@@ -1,6 +1,18 @@
 # Job Application Autofill & Tracker
 
-A Python CLI tool that automates filling out job applications across multiple job boards (Indeed, LinkedIn, Greenhouse, Workable) while helping you track and manage all your applications.
+A Python CLI for finding jobs on public ATS boards, ranking them against a local profile, and filling application forms in Chrome for review. Coverage varies by site and by employer form.
+
+## Verified agent workflow
+
+Search a public Ashby board and prepare one application in visible Chrome:
+
+```powershell
+python -m job_automation.cli agent run "Full Stack Developer" --ashby-board super.com --max-jobs 1
+```
+
+Add `--headless` to run without a window, and `--resume path/to/resume.pdf` to attach a resume where the form asks for one. Repeat `--ashby-board` to search more boards. The command displays the profile name and email it will use before opening an application. It fills fields and reports questions that need review; it does not send an application.
+
+The agent currently requires an Ashby board name because its public jobs feed supplies direct application URLs. The older Indeed discovery scraper returns listing links and is not yet connected to a reliable application navigation flow. A final application is recorded only after the site shows a submission confirmation.
 
 ## Features
 
@@ -8,15 +20,13 @@ A Python CLI tool that automates filling out job applications across multiple jo
 - 📊 **Application Tracking**: Track the status of all your applications in one place
 - 🔍 **Job Board Detection**: Automatically detects which job board you're on
 - 📋 **Form Parsing**: Parses complex forms with text inputs, dropdowns, textareas, checkboxes, and more
-- 🛡️ **Review Before Submit**: Never auto-submits — you always review and click Submit manually
+- 🛡️ **Review Before Submit**: Agent runs stop for review; the separate `apply fill --submit` command requires explicit confirmation
 - 🤖 **Claude Integration** (planned): Use Claude API to help answer screening questions intelligently
 
 ## Supported Job Boards
 
-- Indeed
-- LinkedIn
-- Greenhouse
-- Workable
+- Ashby public job boards: direct application discovery and site-specific form labels
+- Other sites: generic native HTML form filling when given a direct application URL
 
 ## Installation
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 from selenium.webdriver.common.by import By
 
@@ -15,7 +16,7 @@ class AshbyAdapter(ApplicationAdapter):
     name = "ashby"
 
     def matches(self, url: str) -> bool:
-        return "ashbyhq.com" in url.casefold()
+        return (urlparse(url).hostname or "").casefold() == "jobs.ashbyhq.com"
 
     def identity(self, driver: Any, control: Any, fallback: str) -> str:
         """Ashby commonly nests a label beside a field without ``for``."""
@@ -32,7 +33,7 @@ class AshbyAdapter(ApplicationAdapter):
                         label = driver.find_element(By.CSS_SELECTOR, selector)
                     text = label.text.strip()
                     if text:
-                        return f"{text} {fallback}".strip()
+                        return fallback if fallback.startswith(text) else f"{text} {fallback}".strip()
                 except Exception:
                     continue
         return fallback

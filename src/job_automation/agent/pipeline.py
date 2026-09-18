@@ -90,15 +90,21 @@ class ApplicationAgent:
         max_jobs: int = 1,
         min_score: int = 6,
         resume_path: str | None = None,
+        ranked_jobs: list[RankedJob] | None = None,
     ) -> AgentRun:
         """Search, rank, and fill each selected application without sending it."""
         run = AgentRun(query=query, location=location, mode=mode)
-        for ranked in self.prepare(query, location, max_jobs=max_jobs, min_score=min_score):
+        selected = ranked_jobs if ranked_jobs is not None else self.prepare(query, location, max_jobs=max_jobs, min_score=min_score)
+        for index, ranked in enumerate(selected[:max_jobs]):
             item = AgentRunItem(job=ranked.job, score=ranked.match_score)
             try:
+                if index and hasattr(submitter.driver, "switch_to"):
+                    submitter.driver.switch_to.new_window("tab")
                 item.submission = submitter.submit_application(
                     ranked.job.url, resume_path, submit=False
                 )
+                item.submission.company = ranked.job.company
+                item.submission.role = ranked.job.title
             except Exception as exc:
                 item.error = str(exc)
             run.items.append(item)
