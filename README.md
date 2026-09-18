@@ -4,6 +4,12 @@ A Python CLI for finding jobs on public ATS boards, ranking them against a local
 
 ## Verified agent workflow
 
+To open the local web preview on Windows, run
+`.\.venv-run\Scripts\python.exe -m job_automation.cli web` and visit
+`http://127.0.0.1:8765`. It shows recent agent attempts, tracked applications,
+and a read-only public Ashby job search. Keep the command running while the
+preview is open.
+
 Search a public Ashby board and prepare one application in visible Chrome:
 
 ```powershell

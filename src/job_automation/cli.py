@@ -26,6 +26,7 @@ from job_automation.apply import JobSubmitter
 from job_automation.agent import AgentMode, ApplicationAgent
 from job_automation.agent.journal import AgentJournal
 from job_automation.discovery.ashby import search_ashby_board
+from job_automation.web import create_server
 
 
 @click.group()
@@ -39,6 +40,21 @@ from job_automation.discovery.ashby import search_ashby_board
 def main(ctx: click.Context, db_path: str) -> None:
     """Track job applications from the command line."""
     ctx.obj = {"db_path": db_path}
+
+
+@main.command(name="web")
+@click.option("--port", default=8765, type=click.IntRange(1, 65535), show_default=True)
+@click.pass_context
+def web_preview(ctx: click.Context, port: int) -> None:
+    """Start the local read-only web preview."""
+    try:
+        with create_server(ctx.obj["db_path"], port) as server:
+            click.echo(f"ApplyPilot preview: http://127.0.0.1:{port}")
+            server.serve_forever()
+    except KeyboardInterrupt:
+        click.echo("Preview stopped.")
+    except OSError as exc:
+        raise click.ClickException(f"Cannot start preview on port {port}: {exc}") from exc
 
 
 @main.command()
