@@ -12,6 +12,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support.select import Select
 
+from job_automation.adapters import get_adapter
 from job_automation.models import Application, ApplicationStatus
 from job_automation.profile.loader import ProfileLoader
 
@@ -68,6 +69,9 @@ class JobSubmitter:
 
         self.driver.get(job_url)
         self._wait_for_document()
+        adapter = get_adapter(self.driver.current_url)
+        if adapter:
+            values = adapter.prepare_values(values)
         role = self._first_text("h1") or self.driver.title or "Unknown role"
         submission = ApplicationSubmission(
             job_id=job_url.rstrip("/").split("/")[-1] or urlparse(job_url).netloc,
@@ -81,11 +85,11 @@ class JobSubmitter:
 
         for control in self.driver.find_elements(By.CSS_SELECTOR, "input, textarea, select"):
             try:
-                self._fill_one(control, values, resume, submission)
+                self._fill_one(control, values, resume, submission, adapter)
             except Exception as exc:
                 if control.get_attribute("required"):
                     submission.required_fields_needing_review.append(
-                        f"{self._identity(control)} ({exc})"
+                        f"{self._identity(control, adapter)} ({exc})"
                     )
 
         if cover_letter_path:
@@ -129,13 +133,13 @@ class JobSubmitter:
             notes=submission.notes or f"Browser status: {submission.status}",
         )
 
-    def _fill_one(self, control: Any, values: dict[str, str], resume: Path | None, result: ApplicationSubmission) -> None:
+    def _fill_one(self, control: Any, values: dict[str, str], resume: Path | None, result: ApplicationSubmission, adapter: Any | None = None) -> None:
         if not control.is_displayed() or not control.is_enabled():
             return
         input_type = (control.get_attribute("type") or "").casefold()
         if input_type in {"hidden", "submit", "button", "reset"}:
             return
-        identity = self._identity(control)
+        identity = self._identity(control, adapter)
         if input_type == "file":
             if resume and self._looks_like_resume(identity):
                 control.send_keys(str(resume.resolve()))
@@ -172,7 +176,7 @@ class JobSubmitter:
         except Exception:
             return None
 
-    def _identity(self, control: Any) -> str:
+    def _identity(self, control: Any, adapter: Any | None = None) -> str:
         control_id = control.get_attribute("id") or ""
         label = ""
         if control_id:
@@ -181,7 +185,8 @@ class JobSubmitter:
             except Exception:
                 pass
         parts = [label, control.get_attribute("aria-label") or "", control.get_attribute("placeholder") or "", control.get_attribute("name") or "", control_id]
-        return " ".join(part for part in parts if part).strip() or "unnamed field"
+        fallback = " ".join(part for part in parts if part).strip() or "unnamed field"
+        return adapter.identity(self.driver, control, fallback) if adapter else fallback
 
     @staticmethod
     def _looks_like_resume(identity: str) -> bool:

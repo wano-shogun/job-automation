@@ -14,6 +14,8 @@ class JobBoard(str, Enum):
     INDEED = "indeed"
     LINKEDIN = "linkedin"
     GREENHOUSE = "greenhouse"
+    ASHBY = "ashby"
+    LEVER = "lever"
     WORKABLE = "workable"
     UNKNOWN = "unknown"
 
@@ -36,6 +38,10 @@ def detect_job_board_from_url(url: str) -> JobBoard:
         return JobBoard.LINKEDIN
     elif "greenhouse.io" in domain or "greenhouse" in domain:
         return JobBoard.GREENHOUSE
+    elif "ashbyhq.com" in domain:
+        return JobBoard.ASHBY
+    elif "lever.co" in domain:
+        return JobBoard.LEVER
     elif "workable.com" in domain:
         return JobBoard.WORKABLE
     else:
