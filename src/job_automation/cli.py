@@ -7,6 +7,7 @@ Run `job-automation --help` (after an editable install) or
 from __future__ import annotations
 
 import click
+from uuid import uuid4
 
 from job_automation.autofill.engine import AutofillEngine
 from job_automation.browser.driver import BrowserDriver
@@ -23,6 +24,7 @@ from job_automation.discovery import (
 from job_automation.scoring import JobRanker
 from job_automation.apply import JobSubmitter
 from job_automation.agent import AgentMode, ApplicationAgent
+from job_automation.agent.journal import AgentJournal
 from job_automation.discovery.ashby import search_ashby_board
 
 
@@ -191,7 +193,8 @@ def agent_group() -> None:
 @click.option("--headless", is_flag=True, help="Run Chrome without showing a window.")
 @click.option("--ashby-board", multiple=True, help="Search this public Ashby job board; repeat for more boards.")
 @click.option("--resume", type=click.Path(exists=True, dir_okay=False), default=None, help="Resume to attach when requested.")
-def agent_run(query: str, location: str, max_jobs: int, min_score: int, headless: bool, ashby_board: tuple[str, ...], resume: str | None) -> None:
+@click.pass_context
+def agent_run(ctx: click.Context, query: str, location: str, max_jobs: int, min_score: int, headless: bool, ashby_board: tuple[str, ...], resume: str | None) -> None:
     """Search online, rank matches, and fill up to MAX_JOBS for review."""
     loader = ProfileLoader()
     if not loader.validate_profile() or not loader.validate_answers():
@@ -203,50 +206,80 @@ def agent_run(query: str, location: str, max_jobs: int, min_score: int, headless
 
     def discover(search_query: str, search_location: str):
         jobs = []
+        failures = []
         for board in ashby_board:
-            jobs.extend(search_ashby_board(board, search_query, search_location))
+            try:
+                jobs.extend(search_ashby_board(board, search_query, search_location))
+            except Exception as exc:
+                failures.append(f"{board}: {exc}")
+        for failure in failures:
+            click.echo(f"Board search failed: {failure}", err=True)
+        if len(failures) == len(ashby_board):
+            raise click.ClickException("Every configured Ashby board failed. No browser page was opened.")
         return jobs
 
     agent = ApplicationAgent(loader, discover)
-    ranked = agent.prepare(query, location, max_jobs=max_jobs, min_score=min_score)
-    if not ranked:
+    plan = agent.plan(query, location, max_jobs=max_jobs, min_score=min_score)
+    if not plan.jobs:
         click.echo("No matching jobs found. No application page was opened.")
         return
-    click.echo(f"Found {len(ranked)} ranked job(s) (heuristic scores):")
-    for item in ranked:
-        click.echo(f"  {item.match_score}/10 {item.job.title} at {item.job.company}: {item.job.url}")
+    click.echo(f"Found {len(plan.jobs)} ranked job(s) (heuristic scores):")
+    for item in plan.jobs:
+        click.echo(f"  {item.score}/10 {item.job.title} at {item.job.company}: {item.job.url}")
 
-    browser = BrowserDriver(headless=headless)
-    browser.start()
-    try:
-        result = agent.run(
-            query,
-            JobSubmitter(browser.get_driver(), loader),
-            location,
-            mode=AgentMode.HEADLESS if headless else AgentMode.VISIBLE,
-            max_jobs=max_jobs,
-            min_score=min_score,
-            resume_path=resume,
-            ranked_jobs=ranked,
+    with AgentJournal(ctx.obj["db_path"]) as journal:
+        run_id = uuid4().hex
+        journal.create_plan(run_id, plan)
+        browser = BrowserDriver(headless=headless)
+        browser.start()
+        try:
+            result = agent.run(
+                query,
+                JobSubmitter(browser.get_driver(), loader),
+                location,
+                mode=AgentMode.HEADLESS if headless else AgentMode.VISIBLE,
+                max_jobs=max_jobs,
+                min_score=min_score,
+                resume_path=resume,
+                plan=plan,
+                journal=journal,
+                run_id=run_id,
+            )
+            click.echo(f"Run ID: {result.run_id}")
+            filled = sum(bool(item.submission and item.submission.fields_filled) for item in result.items)
+            click.echo(f"Filled {filled} application form(s); {result.ready_for_review} ready for review.")
+            for item in result.items:
+                click.echo(f"{item.job.title} at {item.job.company}: " + (item.error or item.stage.value))
+                if item.submission:
+                    click.echo(f"  Fields filled: {len(item.submission.fields_filled)}")
+                if item.submission and item.submission.required_fields_needing_review:
+                    click.echo("  Needs review: " + ", ".join(item.submission.required_fields_needing_review))
+            if not headless:
+                click.echo("Browser remains open for review. Press Ctrl+C to close it.")
+                try:
+                    import time
+                    while True:
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    pass
+        finally:
+            browser.stop()
+
+
+@agent_group.command(name="status")
+@click.pass_context
+def agent_status(ctx: click.Context) -> None:
+    """Show recently prepared application attempts and their last stage."""
+    with AgentJournal(ctx.obj["db_path"]) as journal:
+        rows = journal.latest()
+    if not rows:
+        click.echo("No agent attempts recorded yet.")
+    for row in rows:
+        click.echo(
+            f"{str(row['run_id'])[:8]} {row['stage']} "
+            f"{row['job_title']} at {row['company']} "
+            f"({row['fields_filled']} fields filled)"
         )
-        filled = sum(bool(item.submission and item.submission.fields_filled) for item in result.items)
-        click.echo(f"Filled {filled} application form(s); {result.ready_for_review} ready for review.")
-        for item in result.items:
-            click.echo(f"{item.job.title} at {item.job.company}: " + (item.error or item.submission.status))
-            if item.submission:
-                click.echo(f"  Fields filled: {len(item.submission.fields_filled)}")
-            if item.submission and item.submission.required_fields_needing_review:
-                click.echo("  Needs review: " + ", ".join(item.submission.required_fields_needing_review))
-        if not headless:
-            click.echo("Browser remains open for review. Press Ctrl+C to close it.")
-            try:
-                import time
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                pass
-    finally:
-        browser.stop()
 
 
 @apply_group.command(name="fill")
@@ -262,20 +295,25 @@ def apply_fill(ctx: click.Context, url: str, resume: str | None, submit: bool, h
         raise click.ClickException("Profile not found at ~/.job-automation/profile.json")
     if not loader.validate_answers():
         raise click.ClickException("Answers not found at ~/.job-automation/answers.json")
-    if submit and not click.confirm("This will send a real job application. Continue?"):
-        raise click.ClickException("Submission cancelled.")
+    if submit and headless:
+        raise click.ClickException("Final submission requires visible Chrome so the completed form can be reviewed.")
 
     browser = BrowserDriver(headless=headless)
     browser.start()
     try:
         submitter = JobSubmitter(browser.get_driver(), loader)
-        result = submitter.submit_application(url, resume, submit=submit)
+        result = submitter.submit_application(url, resume, submit=False)
         click.echo(f"Status: {result.status}")
         click.echo(f"Fields filled: {len(result.fields_filled)}")
         if result.required_fields_needing_review:
             click.echo("Needs review: " + ", ".join(result.required_fields_needing_review))
         if result.notes:
             click.echo(result.notes)
+        if submit and result.status == "ready_for_review":
+            click.echo("Review the completed application in Chrome before deciding to send it.")
+            if click.confirm("Click the final Submit button now?"):
+                result = submitter.submit_filled_application(result)
+                click.echo(f"Final status: {result.status}")
         if result.status == "submitted":
             with JobRepository(ctx.obj["db_path"]) as repo:
                 saved = repo.add(submitter.save_submission_record(result))

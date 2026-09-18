@@ -92,6 +92,7 @@ class JobSubmitter:
                     f"{self._identity(control, adapter)} ({type(exc).__name__}: {exc})"
                 )
 
+        submission.required_fields_needing_review.extend(self._unfilled_required(adapter))
         submission.required_fields_needing_review = list(dict.fromkeys(submission.required_fields_needing_review))
         if cover_letter_path:
             submission.notes = f"Cover letter prepared at {cover_letter_path}; attach it if the site asks."
@@ -116,6 +117,19 @@ class JobSubmitter:
         else:
             result.status = "ready_for_review"
         if not submit or result.status != "ready_for_review":
+            return result
+        return self.submit_filled_application(result)
+
+    def submit_filled_application(self, result: ApplicationSubmission) -> ApplicationSubmission:
+        """Submit the already filled browser page after explicit caller approval."""
+        if result.status != "ready_for_review":
+            raise ValueError("Application is not ready for final submission")
+        adapter = get_adapter(self.driver.current_url)
+        missing = self._unfilled_required(adapter)
+        if missing:
+            result.status = "needs_review"
+            result.required_fields_needing_review.extend(missing)
+            result.required_fields_needing_review = list(dict.fromkeys(result.required_fields_needing_review))
             return result
         button = self._submit_button()
         if button is None:
@@ -159,6 +173,9 @@ class JobSubmitter:
         if input_type == "file":
             if resume and self._looks_like_resume(identity):
                 control.send_keys(str(resume.resolve()))
+                uploaded = control.get_attribute("value") or ""
+                if resume.name.casefold() not in uploaded.casefold():
+                    raise ValueError("Resume upload did not appear in the file control")
                 result.fields_filled.append(identity)
             elif required:
                 result.required_fields_needing_review.append(identity)
@@ -179,6 +196,8 @@ class JobSubmitter:
                 result.required_fields_needing_review.append(identity)
             return
         self._fill_control(control, value)
+        if not self._value_matches(control, value):
+            raise ValueError("Field value did not persist after filling")
         result.fields_filled.append(identity)
 
     def _wait_for_document(self) -> None:
@@ -193,6 +212,34 @@ class JobSubmitter:
             return text or None
         except Exception:
             return None
+
+    def _unfilled_required(self, adapter: Any | None) -> list[str]:
+        """Reinspect the page for required fields revealed during filling."""
+        missing: list[str] = []
+        for control in self.driver.find_elements(By.CSS_SELECTOR, "input, textarea, select"):
+            try:
+                if not control.is_enabled():
+                    continue
+                kind = (control.get_attribute("type") or "").casefold()
+                if kind != "file" and not control.is_displayed():
+                    continue
+                required = bool(control.get_attribute("required")) or control.get_attribute("aria-required") == "true"
+                if not required:
+                    continue
+                if kind in {"radio", "checkbox"}:
+                    if kind == "radio":
+                        name = control.get_attribute("name")
+                        group = self.driver.find_elements(By.NAME, name) if name else [control]
+                        filled = any(option.is_selected() for option in group)
+                    else:
+                        filled = control.is_selected()
+                else:
+                    filled = bool((control.get_attribute("value") or "").strip())
+                if not filled:
+                    missing.append(self._identity(control, adapter))
+            except Exception:
+                missing.append("Required field could not be verified")
+        return missing
 
     def _identity(self, control: Any, adapter: Any | None = None) -> str:
         control_id = control.get_attribute("id") or ""
@@ -229,7 +276,26 @@ class JobSubmitter:
         is_match = (expected in {"yes", "true", "1", "on"} and option in {"yes", "true", "1", "on"}) or (expected in {"no", "false", "0", "off"} and option in {"no", "false", "0", "off"})
         if is_match and not control.is_selected():
             control.click()
-        return is_match
+        return is_match and control.is_selected()
+
+    def _value_matches(self, control: Any, expected: str) -> bool:
+        """Re-find a control after input and check its browser-visible value."""
+        control_id = control.get_attribute("id")
+        control_name = control.get_attribute("name")
+        try:
+            if control_id:
+                current = self.driver.find_element(By.ID, control_id)
+            elif control_name:
+                current = self.driver.find_element(By.NAME, control_name)
+            else:
+                current = control
+            actual = current.get_attribute("value") or ""
+            if current.tag_name.casefold() == "select":
+                selected = Select(current).first_selected_option
+                return expected.strip() in {actual.strip(), selected.text.strip()}
+            return actual.strip() == expected.strip()
+        except Exception:
+            return False
 
     @staticmethod
     def _fill_control(control: Any, value: str) -> None:

@@ -75,6 +75,25 @@ def test_empty_fill_cannot_trigger_submission():
     submitter._submit_button.assert_not_called()
 
 
+def test_fresh_required_field_blocks_final_click():
+    from datetime import datetime
+
+    driver = Mock(current_url="https://jobs.ashbyhq.com/example/abc/application")
+    submitter = JobSubmitter(driver)
+    submitter._unfilled_required = Mock(return_value=["New required question"])
+    submitter._submit_button = Mock()
+    result = ApplicationSubmission(
+        job_id="abc", company="Example", role="Developer",
+        submitted_at=datetime.now(), status="ready_for_review", fields_filled=["Name"],
+    )
+
+    submitter.submit_filled_application(result)
+
+    assert result.status == "needs_review"
+    assert result.required_fields_needing_review == ["New required question"]
+    submitter._submit_button.assert_not_called()
+
+
 def test_existing_thank_you_text_is_not_a_submission_confirmation():
     from selenium.webdriver.common.by import By
 

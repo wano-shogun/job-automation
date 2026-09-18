@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+  <body>
+    <h1>Conditional application</h1>
+    <form>
+      <label for="firstName">First Name</label>
+      <input id="firstName" name="firstName" required>
+      <div id="extra"></div>
+      <button type="submit">Submit</button>
+    </form>
+    <script>
+      document.getElementById('firstName').addEventListener('input', () => {
+        document.getElementById('extra').innerHTML =
+          '<label for="whyRole">Why this role?</label><textarea id="whyRole" name="whyRole" required></textarea>';
+      });
+    </script>
+  </body>
+</html>

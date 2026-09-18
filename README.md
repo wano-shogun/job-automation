@@ -14,6 +14,8 @@ Add `--headless` to run without a window, and `--resume path/to/resume.pdf` to a
 
 The agent currently requires an Ashby board name because its public jobs feed supplies direct application URLs. The older Indeed discovery scraper returns listing links and is not yet connected to a reliable application navigation flow. A final application is recorded only after the site shows a submission confirmation.
 
+Use `python -m job_automation.cli agent status` to inspect recent preparation attempts. The [agent architecture](AGENT_ARCHITECTURE.md) describes the stage contracts, browser loop, and remaining production work.
+
 ## Features
 
 - 🤖 **Smart Form Autofill**: Intelligently detects form fields and auto-fills them from your profile

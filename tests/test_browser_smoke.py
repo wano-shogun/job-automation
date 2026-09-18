@@ -28,3 +28,19 @@ def test_local_form_is_filled_and_never_submitted():
         assert driver.find_element(By.ID, "lastName").get_attribute("value") == "Developer"
         assert driver.find_element(By.ID, "email").get_attribute("value") == "jane@example.com"
         assert result.required_fields_needing_review == []
+
+
+@pytest.mark.skipif(os.environ.get("APPLYPILOT_BROWSER_TEST") != "1", reason="opt-in browser smoke test")
+def test_conditional_required_question_stops_readiness():
+    class DemoLoader:
+        def get_profile_dict(self):
+            return {"name": "Jane Developer", "email": "jane@example.com", "phone": "555-0100"}
+
+        def get_answers_dict(self):
+            return {}
+
+    url = (Path(__file__).parent / "fixtures" / "conditional_form.html").as_uri()
+    with BrowserDriver(headless=True) as browser:
+        result = JobSubmitter(browser.get_driver(), DemoLoader()).submit_application(url)
+        assert result.status == "needs_review"
+        assert any("Why this role" in field for field in result.required_fields_needing_review)
